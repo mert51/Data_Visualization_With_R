@@ -6,12 +6,12 @@ function(dataHolder) {
     data <<- c(data[2:100], dataHolder$value)
 
     plot <- xyplot(y ~ x,
-        data = data.frame(x = 0:99, y = data),
+        data = data.frame(x = -99:0, y = data),
         main = "Data Visualization with R",
-        xlab = "x (sample index)",
-        ylab = "Value",
+        xlab = "time",
+        ylab = "Random(x)",
         type = c("l", "g"),
-        col.line = "#5C3317")
+        col.line = 'dark orange')
     print(plot)
     svg.off()
 }
