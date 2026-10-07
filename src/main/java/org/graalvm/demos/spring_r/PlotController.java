@@ -31,6 +31,7 @@ public class PlotController {
     @GetMapping(value = "/plot", produces = "image/svg+xml")
     public ResponseEntity<String> plot() {
         HttpHeaders headers = new HttpHeaders();
+        headers.set("Cache-Control", "no-cache");   // tarayıcı önbelleğini kullanmamasını sağlar
         headers.set("Refresh", "1");   // tarayıcı sayfayı her saniye yeniler
 
         String svg;
