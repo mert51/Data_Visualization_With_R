@@ -4,6 +4,8 @@ Spring Boot (Java) + GraalVM (R / FastR) + MongoDB ile canlı veri görselleşti
 
 Java uygulaması MongoDB'den **her saniye bir satır** okur, okunan `double` değeri GraalVM Polyglot üzerinden **R fonksiyonuna** gönderir. R, `lattice` kütüphanesinin `xyplot()` fonksiyonuyla bir **SVG grafik** üretir ve tarayıcıya gönderir. Sayfa her saniye kendini yeniler, grafik dinamik olarak değişir.
 
+Proje yapısı, ders yardım sunumundaki örnek proje (`DataHolder`, `PlotController`, `SpringRApplication`, `plot.R`, `application.properties`) ile **aynı dosya setinden** oluşur. Örnekten tek fark, sinüs değeri yerine verinin MongoDB'den okunmasıdır.
+
 ---
 
 ## İçindekiler
@@ -34,12 +36,12 @@ Java uygulaması MongoDB'den **her saniye bir satır** okur, okunan `double` de�
 |---|---|---|
 | a | Her kişi GraalVM ve MongoDB kurmalı | GraalVM CE 22.3.0 (WSL), MongoDB (Windows) |
 | b | CSV'den yalnızca **tek bir sütun** kullanılacak, CSV başta elle MongoDB'ye aktarılacak | `Col-2` kullanılıyor (`app.column`), CSV Compass ile içe aktarıldı |
-| c | 100 satır var; Java her saniye **ardışık bir satırı döngüsel (cyclic) olarak** MongoDB'den okuyacak ve R fonksiyonuna gönderecek | `MongoDataService.next()` sayacı 0→99 gider, 100'e gelince başa döner; tarayıcı her saniye yenilenir |
+| c | 100 satır var; Java her saniye **ardışık bir satırı döngüsel (cyclic) olarak** MongoDB'den okuyacak ve R fonksiyonuna gönderecek | `PlotController.readNext()` sayacı 0→99 gider, 100'e gelince başa döner; tarayıcı her saniye yenilenir |
 | d | Mümkünse `lattice` kütüphanesinden `xyplot()`; x ekseni 0–99 tamsayı, y ekseni Java'dan gelen `double` | `plot.R` içinde `xyplot(y ~ x)`, `x = 0:99` |
 | e | Çizgi tipi, çizgi rengi koyu kahverengi, grid kullan | `type = c("l", "g")`, `col.line = "#5C3317"` |
 | f | Blok diyagram (Figure 1), örnek çıktı (Figure 2) | Ödev PDF'indeki Figure 1; çıktı tarayıcıda `localhost:8080/plot` |
 
-> Not: "Okuma Java tarafından yapılır, R tarafından değil" şartı gereği MongoDB'ye yalnızca Java bağlanır. R'a sadece okunan sayı gönderilir.
+> Not: MongoDB'ye yalnızca Java bağlanır. R'a sadece okunan sayı (`DataHolder`) gönderilir.
 
 ---
 
@@ -50,22 +52,23 @@ Java uygulaması MongoDB'den **her saniye bir satır** okur, okunan `double` de�
  ┌───────────────────────────────────┐        ┌───────────────────────────────────────────────┐
  │                                   │        │   Spring Boot uygulaması (GraalVM JDK 17)     │
  │  Web tarayıcı                     │  HTTP  │  ┌─────────────────────────────────────────┐  │
- │  http://localhost:8080/plot  ◄────┼────────┼─►│ PlotController   (Web sunucusu: Tomcat) │  │
- │  (her 1 sn'de yenilenir)          │        │  │        │                  ▲             │  │
- │                                   │        │  │        ▼                  │ SVG         │  │
- │                                   │        │  │ MongoDataService     R fonksiyonu       │  │
- │  MongoDB Server  (port 27017)     │ TCP    │  │ (sıradaki satırı     (plot.R, FastR,    │  │
- │  admin.data_col  (100 doküman) ◄──┼────────┼──┤  okur, sayaç döner)   xyplot → SVG)     │  │
- │        ▲                          │        │  └─────────────────────────────────────────┘  │
- │        │ elle içe aktarma         │        │                                               │
- │  swe307_pro1.csv (Compass)        │        │   GraalVM Polyglot (Java ⇄ R)                 │
- └───────────────────────────────────┘        └───────────────────────────────────────────────┘
+ │  http://localhost:8080/plot  ◄────┼────────┼─►│ PlotController  (Web sunucusu: Tomcat)  │  │
+ │  (her 1 sn'de yenilenir)          │        │  │   │ readNext()            ▲             │  │
+ │                                   │        │  │   │ (sıradaki satırı      │ SVG         │  │
+ │                                   │        │  │   │  okur, sayaç döner)   │             │  │
+ │  MongoDB Server  (port 27017)     │ TCP    │  │   │                  R fonksiyonu       │  │
+ │  admin.data_col  (100 doküman) ◄──┼────────┼──┤   └────────────────► (plot.R, FastR,   │  │
+ │        ▲                          │        │  │      DataHolder        xyplot → SVG)    │  │
+ │        │ elle içe aktarma         │        │  └─────────────────────────────────────────┘  │
+ │  swe307_pro1.csv (Compass)        │        │                                               │
+ └───────────────────────────────────┘        │   GraalVM Polyglot (Java ⇄ R)                 │
+                                              └───────────────────────────────────────────────┘
 ```
 
 Bir tarayıcı isteğinin yolculuğu:
 
 1. Tarayıcı `GET /plot` ister.
-2. `PlotController`, `MongoDataService.next()` ile **sıradaki satırdaki** sütun değerini okur (ör. `-0.9`).
+2. `PlotController`, `readNext()` ile MongoDB'den **sıradaki satırdaki** sütun değerini okur (ör. `-0.9`).
 3. Değer `DataHolder` nesnesine konur ve R fonksiyonuna verilir (`plotFunction.apply(...)`).
 4. R, son 100 değeri tuttuğu tamponu günceller, `xyplot` ile çizer ve **SVG metni** döndürür.
 5. Controller SVG'yi `image/svg+xml` olarak ve `Refresh: 1` başlığıyla geri gönderir. Tarayıcı 1 saniye sonra aynı sayfayı yeniden ister → döngü sürer.
@@ -98,7 +101,7 @@ Proje WSL içinde şu konumdadır: `/home/mert/spring_r` (Windows'tan: `\\wsl.lo
 Uygulama WSL içinde, MongoDB ise Windows'ta çalışıyor. Varsayılan **NAT** modunda WSL içinden `localhost:27017` Windows'taki MongoDB'ye **ulaşmaz** (WSL'in kendi sanal ağı vardır) ve Windows tarafında `bindIp` ile güvenlik duvarı ayarı gerekir. **Mirrored** modda WSL ve Windows ağ arayüzlerini paylaşır; WSL'deki `localhost` Windows'taki `localhost` ile aynı olur. Böylece:
 
 - MongoDB ayarlarına dokunulmaz, MongoDB ağa açılmaz.
-- Bağlantı adresi sabit kalır: `mongodb://localhost:27017`.
+- Bağlantı adresi sabit kalır: `mongodb://localhost:27017` (Spring Data MongoDB'nin varsayılan adresi de budur).
 - Windows tarayıcısı WSL'deki uygulamaya `http://localhost:8080` ile ulaşır.
 
 Gereksinim: Windows 11 22H2 veya üstü.
@@ -401,10 +404,9 @@ spring_r/
 │   │   │   └── org/graalvm/demos/spring_r/
 │   │   │       ├── SpringRApplication.java   ← Spring Boot başlangıç sınıfı (IntelliJ oluşturur)
 │   │   │       ├── DataHolder.java           ← R'a giden veriyi taşıyan sınıf
-│   │   │       ├── MongoDataService.java     ← MongoDB'den döngüsel okuma
-│   │   │       └── PlotController.java       ← /plot adresi, R'ı çağırır
+│   │   │       └── PlotController.java       ← /plot adresi, MongoDB okuma + R çağrısı
 │   │   └── resources/
-│   │       ├── application.properties        ← bağlantı ve sütun ayarları
+│   │       ├── application.properties        ← veritabanı ve sütun ayarları
 │   │       └── plot.R                        ← R fonksiyonu (xyplot)
 │   └── test/
 │       └── java/org/graalvm/demos/spring_r/
@@ -414,7 +416,7 @@ spring_r/
 
 > Dikkat: `PlotController.java` mutlaka `src/main/java` altında olmalı. `src/test/java` altında oluşturulursa Spring bu sınıfı görmez ve `/plot` adresi 404 verir.
 
-Ödev yardım sunumundaki yapı ile bire bir benzerdir (`DataHolder`, `PlotController`, `SpringRApplication`, `plot.R`, `application.properties`); ek olarak MongoDB okuma işini yapan `MongoDataService` bulunur.
+Bu yapı, ders yardım sunumundaki örnek projeyle birebir aynıdır: `DataHolder`, `PlotController`, `SpringRApplication`, `plot.R`, `application.properties`. Ek bir servis ya da yardımcı sınıf yoktur.
 
 ---
 
@@ -426,7 +428,6 @@ Yol: `src/main/resources/application.properties`
 
 ```properties
 spring.application.name=spring_r
-app.mongo.uri=mongodb://localhost:27017
 app.mongo.database=admin
 app.mongo.collection=data_col
 app.column=Col-2
@@ -434,12 +435,11 @@ app.column=Col-2
 
 | Anahtar | Anlamı |
 |---|---|
-| `app.mongo.uri` | MongoDB adresi. Mirrored mod sayesinde `localhost` Windows'taki MongoDB'dir |
 | `app.mongo.database` | Veritabanı adı (`admin`) |
 | `app.mongo.collection` | Koleksiyon adı (`data_col`) |
 | `app.column` | Grafiğe çizilecek sütun. **Grubuna ait sütunu buraya yaz** |
 
-Bu değerler `@Value` ile okunur; böylece sütunu değiştirmek için kodu düzenlemek gerekmez.
+MongoDB bağlantı adresi için ayrıca bir ayar yoktur: Spring Data MongoDB varsayılan olarak `mongodb://localhost:27017` adresine bağlanır. Mirrored mod sayesinde bu adres Windows'taki MongoDB'dir. Değerler `@Value` ile okunur; sütunu değiştirmek için kodu düzenlemek gerekmez.
 
 ### 11.2 `DataHolder.java`
 
@@ -459,81 +459,7 @@ public class DataHolder {
 
 Sadece **veri taşıyıcı**dır (model). Java'dan R'a tek bir `double` değer götürür. R tarafında `dataHolder$value` ile okunur. Alanın `public` olması R'ın (polyglot üzerinden) alana erişebilmesi için gereklidir.
 
-### 11.3 `MongoDataService.java`
-
-Yol: `src/main/java/org/graalvm/demos/spring_r/MongoDataService.java`
-
-```java
-package org.graalvm.demos.spring_r;
-
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.model.Sorts;
-import jakarta.annotation.PreDestroy;
-import org.bson.Document;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-@Service
-public class MongoDataService {
-
-    private final MongoClient client;
-    private final MongoCollection<Document> collection;
-    private final String column;
-    private int index = 0;   // siradaki satir: 0..99
-
-    public MongoDataService(@Value("${app.mongo.uri}") String uri,
-                            @Value("${app.mongo.database}") String database,
-                            @Value("${app.mongo.collection}") String coll,
-                            @Value("${app.column}") String column) {
-        this.client = MongoClients.create(uri);
-        this.collection = client.getDatabase(database).getCollection(coll);
-        this.column = column;
-    }
-
-    /** Siradaki satirdan secili sutunu okur, son satirdan sonra basa doner. */
-    public synchronized double next() {
-        long total = collection.countDocuments();
-        if (total == 0) {
-            throw new IllegalStateException("Koleksiyon bos");
-        }
-        if (index >= total) {
-            index = 0;
-        }
-        Document doc = collection.find()
-                .sort(Sorts.ascending("_id"))   // import sirasi = satir sirasi
-                .skip(index)
-                .limit(1)
-                .first();
-        index = (index + 1) % (int) total;
-        return doc.get(column, Number.class).doubleValue();
-    }
-
-    @PreDestroy
-    void close() {
-        client.close();
-    }
-}
-```
-
-Satır satır:
-
-- `@Service`: Spring bu sınıftan tek bir nesne oluşturur ve `PlotController`'a enjekte eder.
-- Yapıcı metot: MongoDB'ye bağlanır, veritabanı/koleksiyonu seçer, sütun adını saklar.
-- `index`: Sıradaki satırın numarası (0'dan 99'a). Uygulama başladığında 0'dır.
-- `next()`:
-  1. `countDocuments()` ile toplam satır sayısını alır (bu projede 100).
-  2. `index` toplamı aşmışsa başa (0) döner.
-  3. `_id`'ye göre artan sıralayıp `skip(index).limit(1)` ile **yalnızca bir doküman** getirir.
-  4. `index`'i bir artırır, toplama ulaşınca modül işlemi ile 0'a döndürür → **döngüsel okuma**.
-  5. Seçili sütunun değerini `double` olarak döndürür. `Number` kullanılması önemlidir: MongoDB'de `0` ve `-1` gibi değerler `int` olarak, `0.25` gibileri `double` olarak saklanabilir, `Number` ikisini de karşılar.
-- `synchronized`: Aynı anda gelen iki isteğin sayacı bozmasını engeller.
-- `@PreDestroy`: Uygulama kapanırken MongoDB bağlantısını kapatır.
-
-> Neden kendi `MongoClient`'ımız var? Spring Boot sürümleri arasında bağlantı ayar anahtarları değiştiği için (`spring.data.mongodb.uri` / `spring.mongodb.uri`), özel `app.mongo.*` anahtarlarıyla çalışmak sürümden bağımsız ve daha güvenlidir.
-
-### 11.4 `plot.R`
+### 11.3 `plot.R`
 
 Yol: `src/main/resources/plot.R`
 
@@ -570,70 +496,125 @@ Satır satır:
 - `print(plot)`: Lattice grafikleri `print()` ile çizilir (fonksiyon içinde otomatik çizilmez).
 - `svg.off()`: Cihazı kapatır ve **SVG metnini döndürür**. Bu fonksiyonun son ifadesi olduğu için fonksiyonun dönüş değeri SVG'dir.
 
-### 11.5 `PlotController.java`
+> Ödev şartları: x ekseni **0–99** (`x = 0:99`) ve çizgi **koyu kahverengi** olmalıdır. Ders yardım sunumundaki örnek `x = -99:0` ve `'dark orange'` kullanır; bu projede bu iki değer ödev şartına göre değiştirilmiştir.
+
+### 11.4 `PlotController.java`
 
 Yol: `src/main/java/org/graalvm/demos/spring_r/PlotController.java`
 
 ```java
 package org.graalvm.demos.spring_r;
 
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Sorts;
+import org.bson.Document;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.io.IOException;
 import java.util.function.Function;
 
-@RestController
+@Controller
 public class PlotController {
 
-    private final MongoDataService dataService;
-    private final Function<DataHolder, String> plotFunction;
+    @Value("${app.column}")
+    private String column;
 
-    @SuppressWarnings("unchecked")
-    public PlotController(MongoDataService dataService,
-                          @Value("classpath:plot.R") Resource rSource) throws IOException {
-        this.dataService = dataService;
-        Context ctx = Context.newBuilder().allowAllAccess(true).build();
+    @Autowired
+    private Function<DataHolder, String> plotFunction;
+
+    @Autowired
+    private MongoCollection<Document> collection;
+
+    // Mongo'dan okunacak siradaki satir: 0..99 (100'e gelince basa doner)
+    private int index = 0;
+
+    @Bean
+    static Function<DataHolder, String> getPlotFunction(
+            @Autowired Context ctx,
+            @Value("classpath:plot.R") Resource rSource) throws IOException {
         Source source = Source.newBuilder("R", rSource.getURL()).build();
-        this.plotFunction = ctx.eval(source).as(Function.class);
+        return ctx.eval(source).as(Function.class);
     }
 
-    @GetMapping(value = "/plot", produces = "image/svg+xml")
-    public ResponseEntity<String> plot() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Refresh", "1");   // tarayici sayfayi her saniye yeniler
+    @Bean
+    static MongoCollection<Document> getCollection(
+            MongoClient client,
+            @Value("${app.mongo.database}") String database,
+            @Value("${app.mongo.collection}") String coll) {
+        return client.getDatabase(database).getCollection(coll);
+    }
 
-        String svg;
-        synchronized (plotFunction) {
-            svg = plotFunction.apply(new DataHolder(dataService.next()));
+    @Bean
+    static Context getGraalVMContext() {
+        return Context.newBuilder().allowAllAccess(true).build();
+    }
+
+    // Siradaki satirdan secili sutunu okur, son satirdan sonra basa doner
+    private synchronized double readNext() {
+        long total = collection.countDocuments();
+        if (index >= total) {
+            index = 0;
         }
-        return new ResponseEntity<>(svg, headers, HttpStatus.OK);
+        Document doc = collection.find()
+                .sort(Sorts.ascending("_id"))
+                .skip(index)
+                .limit(1)
+                .first();
+        index = (index + 1) % (int) total;
+        return doc.get(column, Number.class).doubleValue();
+    }
+
+    @RequestMapping(value = "/plot", produces = "image/svg+xml")
+    public ResponseEntity<String> load() {
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.set("Refresh", "1");
+
+        String svg = "";
+        synchronized (plotFunction) {
+            svg = plotFunction.apply(new DataHolder(readNext()));
+        }
+        return new ResponseEntity<String>(svg, responseHeaders, HttpStatus.OK);
     }
 }
 ```
 
-Satır satır:
+Parça parça:
 
-- `@RestController`: Bu sınıf web isteklerini karşılar.
-- Yapıcı metot:
-  - `MongoDataService` otomatik enjekte edilir.
-  - `@Value("classpath:plot.R") Resource rSource`: `resources/plot.R` dosyasını verir.
-  - `Context.newBuilder().allowAllAccess(true).build()`: **GraalVM Polyglot bağlamı**. Java'nın R'ı çalıştırabilmesi ve Java nesnelerine (`DataHolder`) erişebilmesi için tüm erişimler açılır.
-  - `Source.newBuilder("R", ...)`: Kaynağın dili `"R"` olarak belirtilir.
-  - `ctx.eval(source).as(Function.class)`: R dosyasını çalıştırır, dosyanın sonundaki R fonksiyonunu Java `Function` arayüzüne çevirir.
-- `@GetMapping("/plot", produces = "image/svg+xml")`: `http://localhost:8080/plot` isteğini karşılar, yanıt türü SVG'dir.
-- `headers.set("Refresh", "1")`: Tarayıcıya "bu sayfayı 1 saniye sonra yeniden iste" der. Böylece grafik **her saniye** değişir. Ayrı bir zamanlayıcı yoktur; "saniyede bir" tarayıcı yenilemesinden gelir.
-- `synchronized (plotFunction)`: R fonksiyonu aynı anda birden fazla iş parçacığı tarafından çağrılamaz (R bağlamı iş parçacığı güvenli değildir). Kilit bunu sağlar.
-- `dataService.next()` → sıradaki değer, `new DataHolder(...)` → R'a gönderilecek nesne, `plotFunction.apply(...)` → R'ı çalıştırır, SVG metnini döndürür.
+- `@Controller`: Bu sınıf web isteklerini karşılar. Metot `ResponseEntity<String>` döndürdüğü için metin doğrudan yanıt gövdesi olur.
+- `@Value("${app.column}") String column`: Okunacak sütun adı (`Col-2`), `application.properties`'ten gelir.
+- `@Autowired Function<DataHolder, String> plotFunction`: R fonksiyonu. Aşağıdaki `getPlotFunction` bean'i tarafından üretilir ve buraya enjekte edilir.
+- `@Autowired MongoCollection<Document> collection`: `admin.data_col` koleksiyonu. `getCollection` bean'i tarafından üretilir.
+- `int index`: Sıradaki satırın numarası (0'dan 99'a).
+- `@Bean getPlotFunction(...)`: `plot.R` dosyasını GraalVM'e `"R"` dili olarak verir, `ctx.eval(source)` ile çalıştırır ve dosyanın sonundaki R fonksiyonunu Java `Function` arayüzüne çevirir.
+- `@Bean getCollection(...)`: Spring'in otomatik oluşturduğu `MongoClient` ile veritabanı ve koleksiyonu seçer.
+- `@Bean getGraalVMContext()`: **GraalVM Polyglot bağlamı**. `allowAllAccess(true)`, Java'nın R'ı çalıştırabilmesi ve R'ın Java nesnesine (`DataHolder`) erişebilmesi için tüm erişimleri açar.
+- `static` bean metotları: Controller kendi `@Bean` ürettiği nesneyi `@Autowired` ile istediği için, metotlar `static` yapılmıştır. Bu, Spring Boot 4'te controller henüz oluşmadan bean'lerin üretilebilmesini sağlar (döngüsel bağımlılık hatasını önler). İşlevi örnek projedekiyle aynıdır.
+- `readNext()`:
+  1. `countDocuments()` ile toplam satır sayısını alır (bu projede 100).
+  2. `index` toplamı aşmışsa başa (0) döner.
+  3. `_id`'ye göre artan sıralayıp `skip(index).limit(1)` ile **yalnızca bir doküman** getirir.
+  4. `index`'i bir artırır, toplama ulaşınca modül işlemi ile 0'a döndürür → **döngüsel okuma**.
+  5. Seçili sütunun değerini `double` olarak döndürür. `Number` kullanılması önemlidir: MongoDB'de `0` ve `-1` gibi değerler `int`, `0.25` gibi değerler `double` olarak saklanabilir; `Number` ikisini de karşılar.
+  6. `synchronized`: Aynı anda gelen iki isteğin sayacı bozmasını engeller.
+- `@RequestMapping("/plot", produces = "image/svg+xml")`: `http://localhost:8080/plot` isteğini karşılar, yanıt türü SVG'dir.
+- `responseHeaders.set("Refresh", "1")`: Tarayıcıya "bu sayfayı 1 saniye sonra yeniden iste" der. Böylece grafik **her saniye** değişir. Ayrı bir zamanlayıcı yoktur; "saniyede bir" tarayıcı yenilemesinden gelir.
+- `synchronized (plotFunction)`: R bağlamı iş parçacığı güvenli değildir; aynı anda yalnızca bir istek R fonksiyonunu çağırabilir.
+- `plotFunction.apply(new DataHolder(readNext()))`: MongoDB'den okunan değer `DataHolder` içinde R'a gider, R SVG metnini döndürür.
 
-### 11.6 `SpringRApplication.java`
+> Örnek projeden fark: örnekte `10*Math.sin(x)` değeri gönderilir; bu projede `readNext()` ile MongoDB'den okunan değer gönderilir. Yapının geri kalanı (bean'ler, `/plot`, `Refresh` başlığı) aynıdır.
+
+### 11.5 `SpringRApplication.java`
 
 IntelliJ'in oluşturduğu başlangıç sınıfıdır, **değiştirilmez**:
 
@@ -651,7 +632,7 @@ public class SpringRApplication {
 }
 ```
 
-Spring bu sınıfın bulunduğu paketi ve **alt paketlerini** tarar. Yeni sınıfların hepsi aynı pakette (`org.graalvm.demos.spring_r`) olduğu için otomatik bulunurlar.
+Spring bu sınıfın bulunduğu paketi ve **alt paketlerini** tarar. Diğer sınıfların hepsi aynı pakette (`org.graalvm.demos.spring_r`) olduğu için otomatik bulunurlar.
 
 ---
 
@@ -674,7 +655,7 @@ Bu yüzden grafik ilk ~100 saniye soldan düz bir çizgiyle (sıfırlar) başlar
 
 ### 12.2 Döngüsel okuma
 
-`MongoDataService.index` 0'dan başlar ve her `next()` çağrısında bir artar; 100'e ulaşınca 0'a döner. Dolayısıyla veri sonsuza dek `Row-1, Row-2, ..., Row-100, Row-1, ...` sırasıyla okunur.
+`PlotController.index` 0'dan başlar ve her `readNext()` çağrısında bir artar; 100'e ulaşınca 0'a döner. Dolayısıyla veri sonsuza dek `Row-1, Row-2, ..., Row-100, Row-1, ...` sırasıyla okunur.
 
 ### 12.3 `Col-2` verisinin şekli
 
@@ -683,6 +664,17 @@ Bu yüzden grafik ilk ~100 saniye soldan düz bir çizgiyle (sıfırlar) başlar
 ### 12.4 Neden tek sekme?
 
 Sayaç **sunucuda** tutulur ve her `/plot` isteği bir satır tüketir. İki sekme açık olursa grafik iki kat hızlı ilerler. Sunumda **tek sekme** kullan.
+
+### 12.5 Spring bean'lerinin oluşma sırası
+
+Uygulama açılırken Spring şunları sırasıyla kurar:
+
+1. `Context` bean'i (GraalVM Polyglot bağlamı)
+2. `Function<DataHolder, String>` bean'i: `Context` ile `plot.R` çalıştırılır, R fonksiyonu elde edilir
+3. `MongoCollection<Document>` bean'i: Spring'in `MongoClient`'ı ile `admin.data_col` seçilir
+4. `PlotController` nesnesi: yukarıdaki üçü enjekte edilir
+
+Açılışta `plot.R` dosyasının ilk kez çalışması birkaç saniye sürebilir (R ortamı yüklenir).
 
 ---
 
@@ -790,7 +782,7 @@ Mirrored modda Windows tarafındaki bir program da 8080'i tutabilir (`netstat -a
 
 - Windows'ta MongoDB servisi çalışıyor mu? (`services.msc`)
 - `wslinfo --networking-mode` çıktısı `mirrored` mı? `nat` ise `.wslconfig` dosyasını (Bölüm 4.2) kontrol et ve `wsl --shutdown` ile yeniden başlat. Dosya adı `.wslconfig.txt` olmamalı.
-- Windows sürümün mirrored modu desteklemiyorsa (Windows 11 22H2+ gerekir) alternatif: `mongod.cfg` içinde `bindIp` değerine WSL'in gördüğü Windows adresini ekle ve güvenlik duvarında 27017'ye izin ver.
+- Windows sürümün mirrored modu desteklemiyorsa (Windows 11 22H2+ gerekir) alternatif: `mongod.cfg` içinde `bindIp` değerine WSL'in gördüğü Windows adresini ekle, güvenlik duvarında 27017'ye izin ver ve Spring'in MongoDB adresini o IP'ye yönlendir.
 
 ### 16.6 Uygulama açılıyor ama grafik gelmiyor / R hatası
 
@@ -799,21 +791,31 @@ Mirrored modda Windows tarafındaki bir program da 8080'i tutabilir (`netstat -a
 - Uygulama GraalVM ile çalışıyor mu? `mvn -v` çıktısındaki `runtime` GraalVM yolunu göstermeli.
 - İlk istek yavaş olabilir (R'ın ilk çalışması); birkaç saniye bekle.
 
-### 16.7 `Command 'mvn' not found`
+### 16.7 Açılışta `UnsatisfiedDependencyException`, `circular reference` veya `No qualifying bean of type ...`
+
+- `getPlotFunction`, `getCollection` ve `getGraalVMContext` metotlarının **`static`** ve `@Bean` olduğundan emin ol (Bölüm 11.4).
+- `pom.xml`'de `spring-boot-starter-data-mongodb` ve `graal-sdk` bağımlılıkları var mı (Bölüm 9.3)?
+- Hata mesajının en altındaki `Caused by:` satırı gerçek nedeni söyler; önce onu oku.
+
+### 16.8 `Command 'mvn' not found`
 
 Maven kurulu değil: `sudo apt install maven` (Bölüm 7).
 
-### 16.8 Terminal komutları çalışmıyor
+### 16.9 Terminal komutları çalışmıyor
 
 IntelliJ terminalinde **`Local` sekmesi PowerShell**'dir. `mvn`, `R`, `find`, `ss` gibi komutlar için **`Ubuntu`** sekmesini kullan.
 
-### 16.9 Grafik 100'den fazla doküman gösteriyor / döngü bozuk
+### 16.10 Grafik 100'den fazla doküman gösteriyor / döngü bozuk
 
 CSV'yi iki kez içe aktarmış olabilirsin. Compass'ta `data_col` içinde **Documents: 100** olmalı. Fazlaysa koleksiyonu silip CSV'yi bir kez tekrar içe aktar.
 
-### 16.10 `Setting LC_COLLATE to C.UTF-8 failed`
+### 16.11 `Setting LC_COLLATE to C.UTF-8 failed`
 
 R başlarken çıkan zararsız locale uyarısıdır, yok sayılabilir.
+
+### 16.12 Grafik ödev şartlarına uymuyor (x ekseni −99…0 ya da turuncu çizgi)
+
+`plot.R` içinde `x = 0:99` ve `col.line = "#5C3317"` olduğundan emin ol (Bölüm 11.3). Ders örneğindeki `-99:0` ve `'dark orange'` değerleri ödev şartlarına uymaz.
 
 ---
 
@@ -822,6 +824,7 @@ R başlarken çıkan zararsız locale uyarısıdır, yok sayılabilir.
 - [ ] Windows'ta **MongoDB Server** servisi çalışıyor
 - [ ] Compass'ta `admin.data_col` içinde **100 doküman** var
 - [ ] `application.properties` içinde `app.column` = grubunun sütunu (şu an `Col-2`)
+- [ ] `plot.R` içinde `x = 0:99` ve `col.line = "#5C3317"`
 - [ ] Ubuntu terminali açık: `wslinfo --networking-mode` → `mirrored`
 - [ ] `ss -ltnp | grep 8080` boş
 - [ ] `cd ~/spring_r && mvn spring-boot:run` → `Started SpringRApplication ...`
@@ -829,6 +832,6 @@ R başlarken çıkan zararsız locale uyarısıdır, yok sayılabilir.
 - [ ] Grafik: koyu kahverengi çizgi, grid, x ekseni 0–99, saniyede bir yenileniyor
 - [ ] Ekran görüntüleri alındı (tampon dolmadan ve ~100 saniye sonra)
 - [ ] Blok diyagram (Figure 1) hazır
-- [ ] Teslim dosyaları: `pom.xml`, 4 Java dosyası, `plot.R`, `application.properties` (`target/` ve `.idea/` hariç)
+- [ ] Teslim dosyaları: `pom.xml`, 3 Java dosyası (`SpringRApplication`, `DataHolder`, `PlotController`), `plot.R`, `application.properties` (`target/` ve `.idea/` hariç)
 
 Başka bir bilgisayarda sunulacaksa o makinede de sırasıyla şunlar gerekir: WSL2 + mirrored mod (Bölüm 4), GraalVM 22.3.0 (5), R/FastR (6), Maven (7), MongoDB ve CSV içe aktarma (8), proje dosyalarının kopyalanması ve `mvn spring-boot:run`.
